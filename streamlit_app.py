@@ -10,14 +10,13 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-import pathlib
 
 # -------------------------
 # Page & Title
 # -------------------------
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
 st.title("XAI for HR Decisions (SHAP & LIME)")
-st.caption("Upload your HR dataset or use the demo. SHAP explains global drivers of attrition, while LIME shows employee-specific reasons.")
+st.caption("Upload your HR dataset or use the demo. SHAP shows global drivers of attrition; LIME gives employee-specific explanations.")
 
 # -------------------------
 # Helpers
@@ -193,7 +192,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (Raw feature mode)
+# 5. LIME Local (Numeric-only fix)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -201,19 +200,30 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
-    # Build LIME explainer on raw (non-encoded) features
+    # Convert categoricals to codes (ensures numeric-only arrays)
+    X_train_lime = X_train.copy()
+    X_test_lime = X_test.copy()
+    cat_index_map = {}
+    for c in cat_cols:
+        X_train_lime[c] = X_train_lime[c].astype("category").cat.codes
+        X_test_lime[c] = X_test_lime[c].astype("category").cat.codes
+        cat_index_map[c] = X_train.columns.get_loc(c)
+
+    X_train_array = X_train_lime.values.astype(float)
+    X_test_array = X_test_lime.values.astype(float)
+
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=X_train.values,
+        training_data=X_train_array,
         feature_names=X_train.columns.tolist(),
         class_names=["No", "Yes"],
-        categorical_features=[X_train.columns.get_loc(c) for c in cat_cols],
+        categorical_features=list(cat_index_map.values()),
         mode="classification",
         discretize_continuous=True
     )
 
     exp = lime_explainer.explain_instance(
-        X_test.iloc[sample_id].values,
-        model.predict_proba,   # pipeline handles preprocessing
+        X_test_array[sample_id],
+        model.predict_proba,   # pipeline handles preprocessing internally
         num_features=8
     )
 
