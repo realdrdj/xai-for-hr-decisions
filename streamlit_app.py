@@ -192,7 +192,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (Pipeline-safe + HR-friendly mapping)
+# 5. LIME Local (final minimal stable version)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -200,18 +200,15 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
-    # Wrapper so LIME always calls the pipeline
+    # Wrapper: always call the full pipeline
     def pipeline_predict(x):
         if isinstance(x, np.ndarray):
             x = pd.DataFrame(x, columns=X_train.columns)
         return model.predict_proba(x)
 
-    # Build categorical mapping for LIME
+    # categorical index + names for LIME
     categorical_indexes = [X_train.columns.get_loc(c) for c in cat_cols]
-    cat_value_map = {}
-    for c in cat_cols:
-        categories = X_train[c].astype("category").cat.categories
-        cat_value_map[c] = dict(enumerate(categories))
+    cat_value_map = {c: X_train[c].astype("category").cat.categories.tolist() for c in cat_cols}
 
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train.values,
@@ -229,20 +226,12 @@ if len(X_test) > 0:
         num_features=8
     )
 
-    # Reformat explanations for readability
-    explanation_list = []
-    for factor, weight in exp.as_list(label=1):
-        # Clean categorical outputs
-        for c in cat_cols:
-            if c in factor:
-                factor = factor.replace(c, f"{c} =")
-        explanation_list.append((factor, weight))
-
     st.write("**Top local drivers for this employee:**")
-    st.table(pd.DataFrame(explanation_list, columns=["Factor","Effect"]))
+    st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
 
 else:
     st.info("Not enough rows to show local explanation.")
+
 
 # -------------------------
 # 6. Policy Levers
