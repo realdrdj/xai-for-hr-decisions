@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,7 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 import pathlib
 
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
-st.title("Explainable AI for HR Decisions (SHAP & LIME)")
+st.title("XAI for HR Decisions (SHAP & LIME)")
 
 # -------------------------
 # 1. Upload or synthetic data
@@ -81,12 +80,21 @@ st.success(f"{model_choice} trained.")
 # 4. SHAP Global Explanations
 # -------------------------
 st.subheader("Global Explanations (SHAP)")
-explainer = shap.Explainer(model.predict, preprocess.transform(X_train))
-X_sample = preprocess.transform(X_test[:100])
+
+# Use raw DataFrames (pipeline handles preprocessing internally)
+explainer = shap.Explainer(model.predict_proba, X_train)
+
+# Explain on sample (speed)
+X_sample = X_test.sample(50, random_state=42)
 shap_values = explainer(X_sample)
 
 fig, ax = plt.subplots()
-shap.summary_plot(shap_values, X_sample, feature_names=preprocess.get_feature_names_out(), show=False)
+shap.summary_plot(
+    shap_values[:,:,1],  # class 1 (Attrition=Yes)
+    X_sample,
+    feature_names=X_sample.columns,
+    show=False
+)
 st.pyplot(fig)
 
 # -------------------------
@@ -94,8 +102,9 @@ st.pyplot(fig)
 # -------------------------
 st.subheader("Local Explanation (LIME)")
 sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
+
 lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-    training_data=preprocess.transform(X_train),
+    training_data=preprocess.fit_transform(X_train),
     feature_names=preprocess.get_feature_names_out(),
     class_names=["No","Yes"],
     mode="classification"
@@ -114,14 +123,15 @@ st.write(exp.as_list(label=1))
 # -------------------------
 st.subheader("Policy Levers (Example Mapping)")
 LEVER_MAP = {
-    "OverTime_Yes": "Review overtime policy; offer compensatory offs.",
-    "BusinessTravel_Travel_Frequently": "Rotate travel assignments; enable remote work.",
+    "OverTime": "Review overtime policy; offer compensatory offs.",
+    "BusinessTravel": "Rotate travel assignments; enable remote work.",
     "MonthlyIncome": "Audit salary bands; align with market.",
     "JobSatisfaction": "Manager coaching; recognition programs.",
     "YearsAtCompany": "Create mid-tenure growth pathways."
 }
-global_shap = np.abs(shap_values.values).mean(axis=0)
-feat_imp = pd.DataFrame({"feature": preprocess.get_feature_names_out(), "mean_abs_shap": global_shap})
+
+global_mean_abs = np.abs(shap_values[:,:,1].values).mean(axis=0)
+feat_imp = pd.DataFrame({"feature": X_sample.columns, "mean_abs_shap": global_mean_abs})
 top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(5)
 
 policy = [(f, LEVER_MAP.get(f.split("_")[0], "Define HR intervention")) for f in top_feats["feature"]]
@@ -145,3 +155,17 @@ if st.button("Generate Managerial Report"):
     report_path = pathlib.Path("xai_hr_report.html")
     report_path.write_text(html, encoding="utf-8")
     st.download_button("Download Report", data=html, file_name="xai_hr_report.html", mime="text/html")
+
+# -------------------------
+# 8. Footer
+# -------------------------
+st.markdown(
+    """
+    <hr style="margin-top:50px; margin-bottom:10px;">
+    <div style="text-align:center; font-size:14px;">
+        Developed by <b>Prof. Dinesh K.</b> 
+        <a href="https://linktr.ee/realdrdj" target="_blank">(link)</a>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
