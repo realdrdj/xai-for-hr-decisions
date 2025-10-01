@@ -191,8 +191,9 @@ try:
 
 except Exception as e:
     st.error(f"SHAP failed: {e}")
+
 # -------------------------
-# 5. LIME Local (Error-proof)
+# 5. LIME Local (Stable)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee to see why attrition was predicted.")
@@ -200,30 +201,30 @@ st.caption("Pick one employee to see why attrition was predicted.")
 if len(X_test_enc) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test_enc)-1, 0)
 
-    # Prediction function: takes encoded features only
+    # Prediction function: must return (n,2) for class probs
     def clf_predict(x):
-        x = np.array(x).reshape(-1, X_train_enc.shape[1])  # enforce correct feature shape
+        x = np.array(x).reshape(-1, X_train_enc.shape[1])  # enforce (n, features)
         return clf.predict_proba(x)
 
-    # IMPORTANT: LIME must see training data in feature space
+    # Train LIME explainer on encoded feature space
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=X_train_enc,                # shape (n_samples, n_features)
-        feature_names=friendly_features,          # 15 features
+        training_data=X_train_enc,
+        feature_names=friendly_features,
         class_names=["No", "Yes"],
         mode="classification",
         discretize_continuous=False
     )
 
-    # Explain one instance (feature vector, not probas)
+    # Explain one row of encoded test data
+    instance = X_test_enc[sample_id]
     exp = lime_explainer.explain_instance(
-        X_test_enc[sample_id],                   # shape (features,)
-        clf_predict,                             # function returning (n,2)
+        instance,
+        clf_predict,
         num_features=8
     )
 
     st.write("**Top local drivers for this employee:**")
     st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
-
 else:
     st.info("Not enough rows for LIME.")
 
