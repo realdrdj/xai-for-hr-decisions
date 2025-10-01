@@ -17,7 +17,7 @@ import pathlib
 # -------------------------
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
 st.title("XAI for HR Decisions (SHAP & LIME)")
-st.caption("Upload your HR dataset or use the demo. Get transparent insights into attrition risk using SHAP (global drivers) and LIME (local explanations).")
+st.caption("Upload your HR dataset or use the demo. Get transparent insights into attrition risk using SHAP (global drivers) and LIME (local case-specific explanations).")
 
 # -------------------------
 # Helpers
@@ -29,13 +29,11 @@ def make_ohe():
         return OneHotEncoder(handle_unknown="ignore", sparse=False)
 
 def to_dense_float(X):
-    """Ensure dense float32 array for SHAP/LIME."""
     if hasattr(X, "todense"):
         return np.asarray(X.todense()).astype("float32")
     return np.asarray(X).astype("float32")
 
 def friendly_name(name: str) -> str:
-    """Clean feature names for readability."""
     base = name.split("__")[-1]
     parts = base.split("_")
     if len(parts) > 1:
@@ -45,7 +43,7 @@ def friendly_name(name: str) -> str:
 # -------------------------
 # Synthetic dataset generator
 # -------------------------
-def generate_synthetic_hr(n=500, seed=42):
+def generate_synthetic_hr(n=200, seed=42):
     rng = np.random.default_rng(seed)
     df = pd.DataFrame({
         "Age": rng.integers(21, 60, n),
@@ -59,12 +57,34 @@ def generate_synthetic_hr(n=500, seed=42):
         "Gender": rng.choice(["Male","Female"], n, p=[0.55,0.45])
     })
     risk = (
-        (df["OverTime"].eq("Yes")).astype(int)*0.8 
-        + (df["JobSatisfaction"]<2).astype(int)*0.5 
+        (df["OverTime"].eq("Yes")).astype(int)*0.8
+        + (df["JobSatisfaction"]<2).astype(int)*0.5
         + rng.normal(0,0.3,n)
     )
     df["Attrition"] = np.where(risk > 0.5, "Yes", "No")
     return df
+
+# -------------------------
+# CSV Template Download
+# -------------------------
+template = pd.DataFrame({
+    "Age":[30],
+    "MonthlyIncome":[12000],
+    "YearsAtCompany":[5],
+    "JobLevel":[2],
+    "OverTime":["Yes"],
+    "JobSatisfaction":[3],
+    "BusinessTravel":["Travel_Rarely"],
+    "Department":["Sales"],
+    "Gender":["Male"],
+    "Attrition":["Yes"]
+})
+st.download_button(
+    "📥 Download HR CSV Template",
+    template.to_csv(index=False),
+    file_name="hr_template.csv",
+    mime="text/csv"
+)
 
 # -------------------------
 # 1. Upload or use synthetic
@@ -155,17 +175,14 @@ try:
         sv = None
 
     if sv is not None:
-        # Align shapes
         min_feat = min(sv.shape[1], X_test_enc.shape[1], len(friendly_features))
         sv, X_test_enc, friendly_features = sv[:, :min_feat], X_test_enc[:, :min_feat], friendly_features[:min_feat]
 
-        # Plot SHAP summary
         fig, ax = plt.subplots()
         shap.summary_plot(sv, X_test_enc, feature_names=friendly_features, show=False, plot_type="bar")
         plt.tight_layout()
         st.pyplot(fig, clear_figure=True)
 
-        # Importance table
         global_mean_abs = np.abs(sv).mean(axis=0)
         feat_imp = pd.DataFrame({"feature": friendly_features, "mean_abs_shap": global_mean_abs})
         top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(10)
@@ -176,7 +193,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local
+# 5. LIME Local (Fixed)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -184,14 +201,11 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test_enc) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test_enc)-1, 0)
 
-    # FIX: feature_names aligned with encoded matrix
-    lime_feature_names = friendly_features[:X_train_enc.shape[1]]
-
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_enc,
-        feature_names=lime_feature_names,
+        feature_names=None,  # ✅ Let LIME use indices
         class_names=["No", "Yes"],
-        categorical_features=None,  # ✅ Final Fix
+        categorical_features=None,  # ✅ Avoids index mismatch
         mode="classification",
         discretize_continuous=True
     )
@@ -202,8 +216,21 @@ if len(X_test_enc) > 0:
         num_features=8
     )
 
+    local_exp = []
+    for feat, val in exp.as_list(label=1):
+        try:
+            # Extract column index from string like "x0 <= 23.5"
+            idx = int(feat.split()[0][1:])
+            if idx < len(friendly_features):
+                pretty = friendly_features[idx]
+                local_exp.append((pretty, val))
+            else:
+                local_exp.append((feat, val))
+        except:
+            local_exp.append((feat, val))
+
     st.write("**Top local drivers for this employee:**")
-    st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
+    st.table(pd.DataFrame(local_exp, columns=["Factor","Effect"]))
 
 else:
     st.info("Not enough rows to show local explanation.")
