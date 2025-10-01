@@ -24,7 +24,7 @@ st.caption("Upload your HR dataset or use the demo. SHAP shows global drivers of
 def make_ohe():
     try:
         return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    except TypeError:  # older sklearn versions
+    except TypeError:  # for older sklearn
         return OneHotEncoder(handle_unknown="ignore", sparse=False)
 
 def to_dense_float(X):
@@ -192,7 +192,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (Numeric-only fix)
+# 5. LIME Local (Final Wrapper Fix)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -200,7 +200,7 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
-    # Convert categoricals to codes (ensures numeric-only arrays)
+    # Convert categoricals to numeric codes (ensures numeric arrays)
     X_train_lime = X_train.copy()
     X_test_lime = X_test.copy()
     cat_index_map = {}
@@ -211,6 +211,12 @@ if len(X_test) > 0:
 
     X_train_array = X_train_lime.values.astype(float)
     X_test_array = X_test_lime.values.astype(float)
+
+    # ✅ Wrapper for pipeline predict_proba to accept arrays
+    def pipeline_predict_proba(x):
+        if isinstance(x, np.ndarray):
+            x = pd.DataFrame(x, columns=X_train.columns)
+        return model.predict_proba(x)
 
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_array,
@@ -223,7 +229,7 @@ if len(X_test) > 0:
 
     exp = lime_explainer.explain_instance(
         X_test_array[sample_id],
-        model.predict_proba,   # pipeline handles preprocessing internally
+        pipeline_predict_proba,   # ✅ wrapper ensures DataFrame input
         num_features=8
     )
 
