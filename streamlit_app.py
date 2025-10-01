@@ -193,7 +193,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (Fixed)
+# 5. LIME Local (Final Safe Fix)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -203,11 +203,11 @@ if len(X_test_enc) > 0:
 
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_enc,
-        feature_names=None,  # ✅ Let LIME use indices
+        feature_names=friendly_features,   # we pass aligned feature names
         class_names=["No", "Yes"],
-        categorical_features=None,  # ✅ Avoids index mismatch
+        categorical_features=None,         # no categorical handling
         mode="classification",
-        discretize_continuous=True
+        discretize_continuous=False        # ✅ disable discretizer
     )
 
     exp = lime_explainer.explain_instance(
@@ -216,21 +216,8 @@ if len(X_test_enc) > 0:
         num_features=8
     )
 
-    local_exp = []
-    for feat, val in exp.as_list(label=1):
-        try:
-            # Extract column index from string like "x0 <= 23.5"
-            idx = int(feat.split()[0][1:])
-            if idx < len(friendly_features):
-                pretty = friendly_features[idx]
-                local_exp.append((pretty, val))
-            else:
-                local_exp.append((feat, val))
-        except:
-            local_exp.append((feat, val))
-
     st.write("**Top local drivers for this employee:**")
-    st.table(pd.DataFrame(local_exp, columns=["Factor","Effect"]))
+    st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
 
 else:
     st.info("Not enough rows to show local explanation.")
