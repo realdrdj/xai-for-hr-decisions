@@ -12,11 +12,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 
 # -------------------------
-# Page & Title
+# Page Config
 # -------------------------
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
 st.title("XAI for HR Decisions (SHAP & LIME)")
-st.caption("Upload your HR dataset or use the demo. SHAP shows global drivers of attrition; LIME gives employee-specific explanations.")
+st.caption("Upload HR data or use the demo. SHAP shows global drivers; LIME explains individual employees.")
 
 # -------------------------
 # Helpers
@@ -33,6 +33,7 @@ def to_dense_float(X):
     return np.asarray(X).astype("float32")
 
 def friendly_name(name: str) -> str:
+    """Make encoded feature names more readable."""
     base = name.split("__")[-1]
     parts = base.split("_")
     if len(parts) > 1:
@@ -40,7 +41,7 @@ def friendly_name(name: str) -> str:
     return base
 
 # -------------------------
-# Synthetic dataset generator
+# Synthetic Dataset
 # -------------------------
 def generate_synthetic_hr(n=200, seed=42):
     rng = np.random.default_rng(seed)
@@ -51,7 +52,10 @@ def generate_synthetic_hr(n=200, seed=42):
         "JobLevel": rng.integers(1, 5, n),
         "OverTime": rng.choice(["Yes", "No"], n, p=[0.3, 0.7]),
         "JobSatisfaction": rng.integers(1, 5, n),
-        "BusinessTravel": rng.choice(["Non-Travel","Travel_Rarely","Travel_Frequently"], n, p=[0.2,0.6,0.2]),
+        "BusinessTravel": rng.choice(
+            ["Non-Travel","Travel_Rarely","Travel_Frequently"],
+            n, p=[0.2,0.6,0.2]
+        ),
         "Department": rng.choice(["Sales","R&D","HR"], n, p=[0.4,0.5,0.1]),
         "Gender": rng.choice(["Male","Female"], n, p=[0.55,0.45])
     })
@@ -64,7 +68,7 @@ def generate_synthetic_hr(n=200, seed=42):
     return df
 
 # -------------------------
-# CSV Template Download
+# Template Download
 # -------------------------
 template = pd.DataFrame({
     "Age":[30],
@@ -86,35 +90,33 @@ st.download_button(
 )
 
 # -------------------------
-# 1. Upload or use synthetic
+# 1. Load Data
 # -------------------------
 uploaded_file = st.file_uploader("Upload HR dataset (CSV)", type="csv")
-
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.success("✅ Dataset loaded from file.")
+    st.success("✅ Dataset loaded.")
 else:
     df = generate_synthetic_hr()
-    st.info("ℹ️ No file uploaded. Using synthetic demo dataset.")
+    st.info("ℹ️ Using synthetic demo dataset.")
 
-# Normalize target labels
 if "Attrition" in df.columns:
-    if df["Attrition"].dropna().astype(str).str.lower().isin(["0", "1"]).all():
-        df["Attrition"] = df["Attrition"].astype(int).map({0: "No", 1: "Yes"})
+    if df["Attrition"].dropna().astype(str).str.lower().isin(["0","1"]).all():
+        df["Attrition"] = df["Attrition"].astype(int).map({0:"No",1:"Yes"})
 
 st.write("### 👀 Data preview")
 st.dataframe(df.head(10), use_container_width=True)
 
 # -------------------------
-# 2. Preprocess & split
+# 2. Split Data
 # -------------------------
 target = "Attrition"
 if target not in df.columns:
-    st.error("❌ Dataset must contain target column 'Attrition' with Yes/No values.")
+    st.error("❌ Dataset must have column 'Attrition' (Yes/No).")
     st.stop()
 
 X = df.drop(columns=[target])
-y = (df[target].astype(str).str.strip().str.lower() == "yes").astype(int)
+y = (df[target].astype(str).str.strip().str.lower()=="yes").astype(int)
 
 cat_cols = X.select_dtypes(include=["object","category"]).columns.tolist()
 num_cols = X.select_dtypes(exclude=["object","category"]).columns.tolist()
@@ -125,16 +127,17 @@ preprocess = ColumnTransformer([
 ])
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, stratify=y if y.nunique() == 2 else None, test_size=0.25, random_state=42
+    X, y, stratify=y if y.nunique()==2 else None,
+    test_size=0.25, random_state=42
 )
 
 # -------------------------
-# 3. Train model
+# 3. Train Model
 # -------------------------
 st.subheader("⚙️ Train Model")
-model_choice = st.radio("Choose model:", ["Logistic Regression", "Random Forest"], horizontal=True)
+model_choice = st.radio("Choose model:", ["Logistic Regression","Random Forest"], horizontal=True)
 
-if model_choice == "Logistic Regression":
+if model_choice=="Logistic Regression":
     model = Pipeline([("prep", preprocess), ("clf", LogisticRegression(max_iter=400))])
 else:
     model = Pipeline([("prep", preprocess), ("clf", RandomForestClassifier(n_estimators=300, random_state=42))])
@@ -154,7 +157,7 @@ friendly_features = [friendly_name(f) for f in feature_names]
 # 4. SHAP Global
 # -------------------------
 st.subheader("🌍 Global Explanations (SHAP)")
-st.caption("Shows which features have the strongest overall impact on attrition predictions.")
+st.caption("Which features have the strongest overall effect on attrition?")
 
 top_feats = pd.DataFrame()
 policy = []
@@ -163,118 +166,85 @@ try:
     if isinstance(clf, RandomForestClassifier):
         explainer = shap.TreeExplainer(clf)
         shap_values = explainer.shap_values(X_test_enc)
-        sv = np.array(shap_values[1])  # class 1
+        sv = np.array(shap_values[1])
     elif isinstance(clf, LogisticRegression):
         explainer = shap.LinearExplainer(clf, X_train_enc)
         sv = np.array(explainer.shap_values(X_test_enc))
-        if sv.ndim == 1:
+        if sv.ndim==1:
             sv = sv.reshape(-1, X_test_enc.shape[1])
     else:
-        st.warning("⚠️ Unsupported model type for SHAP.")
-        sv = None
+        sv=None
 
     if sv is not None:
-        min_feat = min(sv.shape[1], X_test_enc.shape[1], len(friendly_features))
-        sv, X_test_enc, friendly_features = sv[:, :min_feat], X_test_enc[:, :min_feat], friendly_features[:min_feat]
+        min_feat=min(sv.shape[1], X_test_enc.shape[1], len(friendly_features))
+        sv,X_test_enc,friendly_features = sv[:,:min_feat],X_test_enc[:,:min_feat],friendly_features[:min_feat]
 
-        fig, ax = plt.subplots()
-        shap.summary_plot(sv, X_test_enc, feature_names=friendly_features, show=False, plot_type="bar")
+        fig,ax=plt.subplots()
+        shap.summary_plot(sv,X_test_enc,feature_names=friendly_features,show=False,plot_type="bar")
         plt.tight_layout()
-        st.pyplot(fig, clear_figure=True)
+        st.pyplot(fig,clear_figure=True)
 
-        global_mean_abs = np.abs(sv).mean(axis=0)
-        feat_imp = pd.DataFrame({"feature": friendly_features, "mean_abs_shap": global_mean_abs})
-        top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(10)
-        st.write("**Top global drivers:**")
-        st.dataframe(top_feats, use_container_width=True)
+        global_mean_abs=np.abs(sv).mean(axis=0)
+        feat_imp=pd.DataFrame({"feature":friendly_features,"mean_abs_shap":global_mean_abs})
+        top_feats=feat_imp.sort_values("mean_abs_shap",ascending=False).head(10)
+        st.dataframe(top_feats,use_container_width=True)
 
 except Exception as e:
-    st.error(f"SHAP could not be computed: {e}")
+    st.error(f"SHAP failed: {e}")
 
 # -------------------------
-# 5. LIME Local (Numeric-safe with readable mapping)
+# 5. LIME Local (Pre-encoded stable)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
-st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
+st.caption("Pick one employee to see why attrition was predicted.")
 
-if len(X_test) > 0:
-    sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
+if len(X_test_enc)>0:
+    sample_id=st.slider("Select employee index",0,len(X_test_enc)-1,0)
 
-    # 1. Convert categoricals → codes
-    X_train_lime = X_train.copy()
-    X_test_lime = X_test.copy()
-    cat_index_map = {}
-    cat_value_map = {}
+    def clf_predict(x):
+        return clf.predict_proba(x)
 
-    for c in cat_cols:
-        X_train_lime[c] = X_train_lime[c].astype("category")
-        X_test_lime[c] = X_test_lime[c].astype("category")
-
-        X_train_lime[c] = X_train_lime[c].cat.codes
-        X_test_lime[c] = X_test_lime[c].cat.codes
-
-        # save mapping: index → category string
-        cat_index_map[c] = X_train.columns.get_loc(c)
-        cat_value_map[c] = dict(enumerate(X_train[c].astype("category").cat.categories))
-
-    X_train_array = X_train_lime.values.astype(float)
-    X_test_array = X_test_lime.values.astype(float)
-
-    # 2. Wrapper for model predictions
-    def pipeline_predict(x):
-        if isinstance(x, np.ndarray):
-            x = pd.DataFrame(x, columns=X_train.columns)
-        return model.predict_proba(x)
-
-    # 3. Build LIME explainer
-    lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=X_train_array,
-        feature_names=X_train.columns.tolist(),
-        class_names=["No", "Yes"],
-        categorical_features=list(cat_index_map.values()),
-        categorical_names={c: list(v.values()) for c,v in cat_value_map.items()},
+    lime_explainer=lime.lime_tabular.LimeTabularExplainer(
+        training_data=X_train_enc,
+        feature_names=friendly_features,
+        class_names=["No","Yes"],
+        categorical_features=None,
         mode="classification",
-        discretize_continuous=True
+        discretize_continuous=False
     )
 
-    exp = lime_explainer.explain_instance(
-        X_test_array[sample_id],
-        pipeline_predict,
+    exp=lime_explainer.explain_instance(
+        X_test_enc[sample_id],
+        clf_predict,
         num_features=8
     )
 
-    # 4. Display explanations
-    st.write("**Top local drivers for this employee:**")
-    st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
-
+    st.table(pd.DataFrame(exp.as_list(label=1),columns=["Factor","Effect"]))
 else:
-    st.info("Not enough rows to show local explanation.")
-
-
+    st.info("Not enough rows for LIME.")
 
 # -------------------------
 # 6. Policy Levers
 # -------------------------
 st.subheader("🔧 Policy Levers")
-LEVER_MAP = {
-    "OverTime": "Review overtime policy; offer compensatory offs.",
-    "BusinessTravel": "Rotate travel assignments; enable remote work.",
-    "MonthlyIncome": "Audit salary bands; align with market.",
-    "JobSatisfaction": "Manager coaching; recognition programs.",
-    "YearsAtCompany": "Create mid-tenure growth pathways."
+LEVER_MAP={
+    "OverTime":"Review overtime policy; offer compensatory offs.",
+    "BusinessTravel":"Rotate travel assignments; enable remote work.",
+    "MonthlyIncome":"Audit salary bands; align with market.",
+    "JobSatisfaction":"Manager coaching; recognition programs.",
+    "YearsAtCompany":"Create mid-tenure growth pathways."
 }
-
 if not top_feats.empty:
-    base_feats = [f.split(":")[0] for f in top_feats["feature"]]
-    policy = [(f, LEVER_MAP.get(f, "Define a targeted HR intervention.")) for f in base_feats[:5]]
-    st.table(pd.DataFrame(policy, columns=["Driver","Suggested Action"]))
+    base_feats=[f.split(":")[0] for f in top_feats["feature"]]
+    policy=[(f,LEVER_MAP.get(f,"Define HR intervention.")) for f in base_feats[:5]]
+    st.table(pd.DataFrame(policy,columns=["Driver","Suggested Action"]))
 
 # -------------------------
 # 7. Export Report
 # -------------------------
 st.subheader("📥 Export Managerial Report")
 if st.button("Generate & download HTML report"):
-    html = f"""
+    html=f"""
     <html><body>
     <h2>XAI HR Report</h2>
     <p><b>Model:</b> {model_choice}</p>
@@ -285,14 +255,14 @@ if st.button("Generate & download HTML report"):
     <p><i>Generated by Streamlit app</i></p>
     </body></html>
     """
-    st.download_button("Download HTML report", data=html, file_name="xai_hr_report.html", mime="text/html")
+    st.download_button("Download HTML report",data=html,file_name="xai_hr_report.html",mime="text/html")
 
 # -------------------------
 # 8. Footer
 # -------------------------
 st.markdown(
     """
-    <hr style="margin-top:50px; margin-bottom:10px;">
+    <hr>
     <div style="text-align:center; font-size:14px;">
         Developed by <b>Prof. Dinesh K.</b>
         <a href="https://linktr.ee/realdrdj" target="_blank">(link)</a>
