@@ -29,12 +29,18 @@ def generate_synthetic_hr(n=500, seed=42):
         "JobLevel": rng.integers(1, 5, n),
         "OverTime": rng.choice(["Yes", "No"], n, p=[0.3, 0.7]),
         "JobSatisfaction": rng.integers(1, 5, n),
-        "BusinessTravel": rng.choice(["Non-Travel","Travel_Rarely","Travel_Frequently"], n, p=[0.2,0.6,0.2]),
+        "BusinessTravel": rng.choice(
+            ["Non-Travel","Travel_Rarely","Travel_Frequently"], 
+            n, p=[0.2,0.6,0.2]),
         "Department": rng.choice(["Sales","R&D","HR"], n, p=[0.4,0.5,0.1]),
         "Gender": rng.choice(["Male","Female"], n, p=[0.55,0.45])
     })
     # Attrition label with simple rule
-    risk = (df["OverTime"].eq("Yes")).astype(int)*0.8 + (df["JobSatisfaction"]<2).astype(int)*0.5 + rng.normal(0,0.3,n)
+    risk = (
+        (df["OverTime"].eq("Yes")).astype(int)*0.8 
+        + (df["JobSatisfaction"]<2).astype(int)*0.5 
+        + rng.normal(0,0.3,n)
+    )
     df["Attrition"] = np.where(risk > 0.5, "Yes", "No")
     return df
 
@@ -62,16 +68,20 @@ preprocess = ColumnTransformer([
     ("num", "passthrough", num_cols)
 ])
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.25, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, stratify=y, test_size=0.25, random_state=42
+)
 
 # -------------------------
 # 3. Model training
 # -------------------------
 model_choice = st.radio("Choose model:", ["Logistic Regression", "Random Forest"])
 if model_choice == "Logistic Regression":
-    model = Pipeline([("prep", preprocess), ("clf", LogisticRegression(max_iter=200))])
+    model = Pipeline([("prep", preprocess), 
+                      ("clf", LogisticRegression(max_iter=200))])
 else:
-    model = Pipeline([("prep", preprocess), ("clf", RandomForestClassifier(n_estimators=200, random_state=42))])
+    model = Pipeline([("prep", preprocess), 
+                      ("clf", RandomForestClassifier(n_estimators=200, random_state=42))])
 
 model.fit(X_train, y_train)
 st.success(f"{model_choice} trained.")
@@ -81,21 +91,28 @@ st.success(f"{model_choice} trained.")
 # -------------------------
 st.subheader("Global Explanations (SHAP)")
 
-# Use raw DataFrames (pipeline handles preprocessing internally)
-explainer = shap.Explainer(model.predict_proba, X_train)
+# Encode features for SHAP
+X_train_enc = preprocess.fit_transform(X_train)
+X_test_enc = preprocess.transform(X_test)
+feature_names = preprocess.get_feature_names_out()
 
-# Explain on sample (speed)
-X_sample = X_test.sample(50, random_state=42)
-shap_values = explainer(X_sample)
+clf = model.named_steps["clf"]
 
-fig, ax = plt.subplots()
-shap.summary_plot(
-    shap_values[:,:,1],  # class 1 (Attrition=Yes)
-    X_sample,
-    feature_names=X_sample.columns,
-    show=False
-)
-st.pyplot(fig)
+if isinstance(clf, RandomForestClassifier):
+    explainer = shap.TreeExplainer(clf)
+    shap_values = explainer.shap_values(X_test_enc)
+    sv = shap_values[1]  # class 1 = Attrition=Yes
+elif isinstance(clf, LogisticRegression):
+    explainer = shap.LinearExplainer(clf, X_train_enc)
+    sv = explainer.shap_values(X_test_enc)
+else:
+    st.error("Unsupported model type for SHAP.")
+    sv = None
+
+if sv is not None:
+    fig, ax = plt.subplots()
+    shap.summary_plot(sv, X_test_enc, feature_names=feature_names, show=False)
+    st.pyplot(fig)
 
 # -------------------------
 # 5. Local LIME Explanation
@@ -104,15 +121,15 @@ st.subheader("Local Explanation (LIME)")
 sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
 lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-    training_data=preprocess.fit_transform(X_train),
-    feature_names=preprocess.get_feature_names_out(),
+    training_data=X_train_enc,
+    feature_names=feature_names,
     class_names=["No","Yes"],
     mode="classification"
 )
 
 exp = lime_explainer.explain_instance(
-    preprocess.transform(X_test.iloc[[sample_id]])[0],
-    model.predict_proba,
+    X_test_enc[sample_id],
+    clf.predict_proba,
     num_features=5
 )
 st.write("LIME explanation for selected case:")
@@ -130,8 +147,8 @@ LEVER_MAP = {
     "YearsAtCompany": "Create mid-tenure growth pathways."
 }
 
-global_mean_abs = np.abs(shap_values[:,:,1].values).mean(axis=0)
-feat_imp = pd.DataFrame({"feature": X_sample.columns, "mean_abs_shap": global_mean_abs})
+global_mean_abs = np.abs(sv).mean(axis=0)
+feat_imp = pd.DataFrame({"feature": feature_names, "mean_abs_shap": global_mean_abs})
 top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(5)
 
 policy = [(f, LEVER_MAP.get(f.split("_")[0], "Define HR intervention")) for f in top_feats["feature"]]
