@@ -37,8 +37,6 @@ def to_dense_float(X):
 def friendly_name(name: str) -> str:
     """Clean feature names for readability."""
     base = name.split("__")[-1]
-    if ":" in base:
-        return base
     parts = base.split("_")
     if len(parts) > 1:
         return f"{parts[0]}: {' '.join(parts[1:])}"
@@ -185,12 +183,17 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 
 if len(X_test_enc) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test_enc)-1, 0)
+
+    # FIX: categorical_features = [] because we already one-hot encoded
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_enc,
         feature_names=friendly_features,
-        class_names=["No","Yes"],
-        mode="classification"
+        class_names=["No", "Yes"],
+        categorical_features=[],  # key fix
+        mode="classification",
+        discretize_continuous=True
     )
+
     exp = lime_explainer.explain_instance(X_test_enc[sample_id], clf.predict_proba, num_features=8)
     st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
 else:
