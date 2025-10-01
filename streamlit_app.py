@@ -35,7 +35,6 @@ def generate_synthetic_hr(n=500, seed=42):
         "Department": rng.choice(["Sales","R&D","HR"], n, p=[0.4,0.5,0.1]),
         "Gender": rng.choice(["Male","Female"], n, p=[0.55,0.45])
     })
-    # Attrition label with simple rule
     risk = (
         (df["OverTime"].eq("Yes")).astype(int)*0.8 
         + (df["JobSatisfaction"]<2).astype(int)*0.5 
@@ -51,7 +50,7 @@ else:
     df = generate_synthetic_hr()
     st.info("No CSV uploaded. Using synthetic HR dataset.")
 
-st.write("### Data preview", df.head())
+st.write("### 👀 Data preview", df.head())
 
 # -------------------------
 # 2. Preprocess & split
@@ -75,6 +74,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 # -------------------------
 # 3. Model training
 # -------------------------
+st.subheader("⚙️ Train Model")
 model_choice = st.radio("Choose model:", ["Logistic Regression", "Random Forest"])
 if model_choice == "Logistic Regression":
     model = Pipeline([("prep", preprocess), 
@@ -84,40 +84,47 @@ else:
                       ("clf", RandomForestClassifier(n_estimators=200, random_state=42))])
 
 model.fit(X_train, y_train)
-st.success(f"{model_choice} trained.")
+st.success(f"{model_choice} trained successfully.")
 
 # -------------------------
 # 4. SHAP Global Explanations
 # -------------------------
-st.subheader("Global Explanations (SHAP)")
+st.subheader("🌍 Global Explanations (SHAP)")
+st.markdown("These plots show which features most strongly drive attrition risk in the **whole dataset**.")
 
-# Encode features for SHAP
 X_train_enc = preprocess.fit_transform(X_train)
 X_test_enc = preprocess.transform(X_test)
 feature_names = preprocess.get_feature_names_out()
-
 clf = model.named_steps["clf"]
 
-if isinstance(clf, RandomForestClassifier):
-    explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(X_test_enc)
-    sv = shap_values[1]  # class 1 = Attrition=Yes
-elif isinstance(clf, LogisticRegression):
-    explainer = shap.LinearExplainer(clf, X_train_enc)
-    sv = explainer.shap_values(X_test_enc)
-else:
-    st.error("Unsupported model type for SHAP.")
-    sv = None
+try:
+    if isinstance(clf, RandomForestClassifier):
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_test_enc)
+        sv = shap_values[1]  # class 1 (Attrition=Yes)
+    elif isinstance(clf, LogisticRegression):
+        explainer = shap.LinearExplainer(clf, X_train_enc)
+        sv = explainer.shap_values(X_test_enc)
+        if sv.ndim == 1:
+            sv = sv.reshape(-1, len(feature_names))  # force 2D
+    else:
+        st.warning("Unsupported model type for SHAP.")
+        sv = None
 
-if sv is not None:
-    fig, ax = plt.subplots()
-    shap.summary_plot(sv, X_test_enc, feature_names=feature_names, show=False)
-    st.pyplot(fig)
+    if sv is not None:
+        fig, ax = plt.subplots()
+        shap.summary_plot(sv, X_test_enc, feature_names=feature_names, show=False)
+        st.pyplot(fig)
+
+except Exception as e:
+    st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
 # 5. Local LIME Explanation
 # -------------------------
-st.subheader("Local Explanation (LIME)")
+st.subheader("👤 Local Explanation (LIME)")
+st.markdown("Pick an employee to see which factors influenced *that specific prediction*.")
+
 sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
 lime_explainer = lime.lime_tabular.LimeTabularExplainer(
@@ -132,13 +139,13 @@ exp = lime_explainer.explain_instance(
     clf.predict_proba,
     num_features=5
 )
-st.write("LIME explanation for selected case:")
+st.write("Top factors for this case:")
 st.write(exp.as_list(label=1))
 
 # -------------------------
 # 6. Policy lever mapping
 # -------------------------
-st.subheader("Policy Levers (Example Mapping)")
+st.subheader("🔧 Policy Levers (Turn insights into actions)")
 LEVER_MAP = {
     "OverTime": "Review overtime policy; offer compensatory offs.",
     "BusinessTravel": "Rotate travel assignments; enable remote work.",
@@ -147,25 +154,25 @@ LEVER_MAP = {
     "YearsAtCompany": "Create mid-tenure growth pathways."
 }
 
-global_mean_abs = np.abs(sv).mean(axis=0)
-feat_imp = pd.DataFrame({"feature": feature_names, "mean_abs_shap": global_mean_abs})
-top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(5)
-
-policy = [(f, LEVER_MAP.get(f.split("_")[0], "Define HR intervention")) for f in top_feats["feature"]]
-st.table(pd.DataFrame(policy, columns=["Feature", "Suggested Action"]))
+if 'sv' in locals() and sv is not None:
+    global_mean_abs = np.abs(sv).mean(axis=0)
+    feat_imp = pd.DataFrame({"feature": feature_names, "mean_abs_shap": global_mean_abs})
+    top_feats = feat_imp.sort_values("mean_abs_shap", ascending=False).head(5)
+    policy = [(f, LEVER_MAP.get(f.split("_")[0], "Define HR intervention")) for f in top_feats["feature"]]
+    st.table(pd.DataFrame(policy, columns=["Feature", "Suggested Action"]))
 
 # -------------------------
 # 7. Export HTML report
 # -------------------------
-if st.button("Generate Managerial Report"):
+if st.button("📥 Generate Managerial Report"):
     html = f"""
     <html><body>
     <h2>Explainable AI HR Report</h2>
     <p><b>Model:</b> {model_choice}</p>
     <h3>Top Global Drivers</h3>
-    {top_feats.to_html(index=False)}
+    {top_feats.to_html(index=False) if 'top_feats' in locals() else 'Not available'}
     <h3>Policy Levers</h3>
-    <ul>{''.join([f"<li>{f}: {a}</li>" for f,a in policy])}</ul>
+    <ul>{''.join([f"<li>{f}: {a}</li>" for f,a in policy]) if 'policy' in locals() else 'Not available'}</ul>
     <p><i>Generated by Streamlit app</i></p>
     </body></html>
     """
