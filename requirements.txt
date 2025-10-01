@@ -1,7 +1,7 @@
-streamlit
-scikit-learn
-pandas
-numpy
-shap
-lime
-matplotlib
+streamlit>=1.35
+scikit-learn>=1.2,<1.4
+pandas>=1.5,<2.1
+numpy>=1.23,<1.27
+shap>=0.44,<0.46
+lime>=0.2.0.1
+matplotlib>=3.7,<3.9
