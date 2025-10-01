@@ -193,7 +193,7 @@ except Exception as e:
     st.error(f"SHAP failed: {e}")
 
 # -------------------------
-# 5. LIME Local (Pre-encoded stable)
+# 5. LIME Local (Stable RF + LR)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee to see why attrition was predicted.")
@@ -202,13 +202,13 @@ if len(X_test_enc)>0:
     sample_id=st.slider("Select employee index",0,len(X_test_enc)-1,0)
 
     def clf_predict(x):
+        x = np.array(x).reshape(-1, X_train_enc.shape[1])  # ensure correct shape
         return clf.predict_proba(x)
 
     lime_explainer=lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_enc,
         feature_names=friendly_features,
         class_names=["No","Yes"],
-        categorical_features=None,
         mode="classification",
         discretize_continuous=False
     )
@@ -219,6 +219,7 @@ if len(X_test_enc)>0:
         num_features=8
     )
 
+    st.write("**Top local drivers for this employee:**")
     st.table(pd.DataFrame(exp.as_list(label=1),columns=["Factor","Effect"]))
 else:
     st.info("Not enough rows for LIME.")
