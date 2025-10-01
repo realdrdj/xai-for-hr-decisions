@@ -192,7 +192,7 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (final minimal stable version)
+# 5. LIME Local (Numeric-safe with readable mapping)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
@@ -200,37 +200,56 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
-    # Wrapper: always call the full pipeline
+    # 1. Convert categoricals → codes
+    X_train_lime = X_train.copy()
+    X_test_lime = X_test.copy()
+    cat_index_map = {}
+    cat_value_map = {}
+
+    for c in cat_cols:
+        X_train_lime[c] = X_train_lime[c].astype("category")
+        X_test_lime[c] = X_test_lime[c].astype("category")
+
+        X_train_lime[c] = X_train_lime[c].cat.codes
+        X_test_lime[c] = X_test_lime[c].cat.codes
+
+        # save mapping: index → category string
+        cat_index_map[c] = X_train.columns.get_loc(c)
+        cat_value_map[c] = dict(enumerate(X_train[c].astype("category").cat.categories))
+
+    X_train_array = X_train_lime.values.astype(float)
+    X_test_array = X_test_lime.values.astype(float)
+
+    # 2. Wrapper for model predictions
     def pipeline_predict(x):
         if isinstance(x, np.ndarray):
             x = pd.DataFrame(x, columns=X_train.columns)
         return model.predict_proba(x)
 
-    # categorical index + names for LIME
-    categorical_indexes = [X_train.columns.get_loc(c) for c in cat_cols]
-    cat_value_map = {c: X_train[c].astype("category").cat.categories.tolist() for c in cat_cols}
-
+    # 3. Build LIME explainer
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=X_train.values,
+        training_data=X_train_array,
         feature_names=X_train.columns.tolist(),
         class_names=["No", "Yes"],
-        categorical_features=categorical_indexes,
-        categorical_names=cat_value_map,
+        categorical_features=list(cat_index_map.values()),
+        categorical_names={c: list(v.values()) for c,v in cat_value_map.items()},
         mode="classification",
         discretize_continuous=True
     )
 
     exp = lime_explainer.explain_instance(
-        X_test.values[sample_id],
+        X_test_array[sample_id],
         pipeline_predict,
         num_features=8
     )
 
+    # 4. Display explanations
     st.write("**Top local drivers for this employee:**")
     st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
 
 else:
     st.info("Not enough rows to show local explanation.")
+
 
 
 # -------------------------
