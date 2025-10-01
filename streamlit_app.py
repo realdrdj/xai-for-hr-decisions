@@ -17,7 +17,7 @@ import pathlib
 # -------------------------
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
 st.title("XAI for HR Decisions (SHAP & LIME)")
-st.caption("Upload your HR dataset or use the demo. Get transparent insights into attrition risk using SHAP (global drivers) and LIME (local case-specific explanations).")
+st.caption("Upload your HR dataset or use the demo. Get transparent insights into attrition risk using SHAP (global drivers) and LIME (local explanations).")
 
 # -------------------------
 # Helpers
@@ -184,18 +184,27 @@ st.caption("Pick one employee and see why the model predicted Attrition=Yes/No f
 if len(X_test_enc) > 0:
     sample_id = st.slider("Select employee index", 0, len(X_test_enc)-1, 0)
 
-    # FIX: categorical_features = [] because we already one-hot encoded
+    # FIX: feature_names aligned with encoded matrix
+    lime_feature_names = friendly_features[:X_train_enc.shape[1]]
+
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=X_train_enc,
-        feature_names=friendly_features,
+        feature_names=lime_feature_names,
         class_names=["No", "Yes"],
-        categorical_features=[],  # key fix
+        categorical_features=None,  # ✅ Final Fix
         mode="classification",
         discretize_continuous=True
     )
 
-    exp = lime_explainer.explain_instance(X_test_enc[sample_id], clf.predict_proba, num_features=8)
+    exp = lime_explainer.explain_instance(
+        X_test_enc[sample_id],
+        clf.predict_proba,
+        num_features=8
+    )
+
+    st.write("**Top local drivers for this employee:**")
     st.table(pd.DataFrame(exp.as_list(label=1), columns=["Factor","Effect"]))
+
 else:
     st.info("Not enough rows to show local explanation.")
 
