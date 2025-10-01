@@ -17,7 +17,7 @@ import pathlib
 # -------------------------
 st.set_page_config(page_title="XAI for HR Decisions", layout="wide")
 st.title("XAI for HR Decisions (SHAP & LIME)")
-st.caption("Upload your HR dataset or use the demo. Get transparent insights into attrition risk using SHAP (global drivers) and LIME (local case-specific explanations).")
+st.caption("Upload your HR dataset or use the demo. SHAP explains global drivers of attrition, while LIME shows employee-specific reasons.")
 
 # -------------------------
 # Helpers
@@ -193,26 +193,27 @@ except Exception as e:
     st.error(f"SHAP could not be computed: {e}")
 
 # -------------------------
-# 5. LIME Local (Final Safe Fix)
+# 5. LIME Local (Raw feature mode)
 # -------------------------
 st.subheader("👤 Local Explanations (LIME)")
 st.caption("Pick one employee and see why the model predicted Attrition=Yes/No for them.")
 
-if len(X_test_enc) > 0:
-    sample_id = st.slider("Select employee index", 0, len(X_test_enc)-1, 0)
+if len(X_test) > 0:
+    sample_id = st.slider("Select employee index", 0, len(X_test)-1, 0)
 
+    # Build LIME explainer on raw (non-encoded) features
     lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=X_train_enc,
-        feature_names=friendly_features,   # we pass aligned feature names
+        training_data=X_train.values,
+        feature_names=X_train.columns.tolist(),
         class_names=["No", "Yes"],
-        categorical_features=None,         # no categorical handling
+        categorical_features=[X_train.columns.get_loc(c) for c in cat_cols],
         mode="classification",
-        discretize_continuous=False        # ✅ disable discretizer
+        discretize_continuous=True
     )
 
     exp = lime_explainer.explain_instance(
-        X_test_enc[sample_id],
-        clf.predict_proba,
+        X_test.iloc[sample_id].values,
+        model.predict_proba,   # pipeline handles preprocessing
         num_features=8
     )
 
