@@ -286,4 +286,28 @@ if st.button("Generate & download HTML report"):
     <h2>XAI for HR Decisions — Managerial Brief</h2>
     <p><b>Model:</b> {model_choice}</p>
     <h3>Top global drivers (mean |SHAP|)</h3>
-    {top_feats.to_html(index=False) if no
+    {top_feats.to_html(index=False) if not top_feats.empty else "<p>Not available</p>"}
+    <h3>Suggested policy levers</h3>
+    <ul>
+    {''.join([f"<li><b>{f}</b>: {a}</li>" for f,a in policy]) if policy else "<li>Not available</li>"}
+    </ul>
+    <p style="font-size:12px; color:#666;">SHAP/LIME explain model behavior, not causality. Combine with HR judgment and fairness checks.</p>
+    </body></html>
+    """
+    report_path = pathlib.Path("xai_hr_report.html")
+    report_path.write_text(html, encoding="utf-8")
+    st.download_button("Download HTML report", data=html, file_name="xai_hr_report.html", mime="text/html")
+
+# -------------------------
+# 8) Footer (always visible)
+# -------------------------
+st.markdown(
+    """
+    <hr style="margin-top:50px; margin-bottom:10px;">
+    <div style="text-align:center; font-size:14px;">
+        Developed by <b>Prof. Dinesh K.</b>
+        <a href="https://linktr.ee/realdrdj" target="_blank">(link)</a>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
